@@ -109,6 +109,8 @@ class AssSubtitleTextureView : TextureView, AssSubtitleRender, TextureView.Surfa
 
         private lateinit var handler: Handler
 
+        private var lastDrawTimestampNanos: Long = 0L
+
         private var eglDisplay: EGLDisplay = EGL14.EGL_NO_DISPLAY
         private var eglContext: EGLContext = EGL14.EGL_NO_CONTEXT
         private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
@@ -165,9 +167,13 @@ class AssSubtitleTextureView : TextureView, AssSubtitleRender, TextureView.Surfa
 
         private fun sizeChangedInternal(width: Int, height: Int) {
             render.onSurfaceChanged(width, height)
+            if (lastDrawTimestampNanos != 0L) {
+                drawInternal(lastDrawTimestampNanos)
+            }
         }
 
         private fun drawInternal(timestampNanos: Long) {
+            lastDrawTimestampNanos = timestampNanos
             if (eglDisplay == EGL14.EGL_NO_DISPLAY) return
             if (render.onDrawFrame(timestampNanos)) {
                 EGL14.eglSwapBuffers(eglDisplay, eglSurface)
@@ -280,6 +286,7 @@ class AssSubtitleTextureView : TextureView, AssSubtitleRender, TextureView.Surfa
 
         override fun onSurfaceChanged(width: Int, height: Int) {
             surfaceSize = Size(width, height)
+            surfaceDirty = true
             assHandler.render?.setFrameSize(width, height)
             GLES20.glViewport(0, 0, width, height)
         }
@@ -287,8 +294,8 @@ class AssSubtitleTextureView : TextureView, AssSubtitleRender, TextureView.Surfa
         override fun onDrawFrame(timestampNanos: Long): Boolean {
             val assFrame = assHandler.render?.renderFrame(timestampNanos / 1000, AssTexType.TEXTURE)
 
-            // if content not change, just return the tex
-            if (assFrame != null && assFrame.changed == 0) {
+            // if content not change and surface is clean, just return the tex
+            if (assFrame != null && assFrame.changed == 0 && !surfaceDirty) {
                 return false
             }
 
