@@ -126,6 +126,7 @@ class AssSubtitleTextureView : TextureView, AssSubtitleRender, TextureView.Surfa
 
         fun onSurfaceSizeChanged(width: Int, height: Int) {
             this.width = width
+            this.height = height
             handler.sendEmptyMessage(MSG_SURFACE_SIZE_CHANGED)
         }
 
