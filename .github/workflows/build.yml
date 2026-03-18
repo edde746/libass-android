@@ -1,0 +1,60 @@
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: "Create a GitHub release"
+        type: boolean
+        default: false
+      release_tag:
+        description: "Release tag (e.g. v0.4.0)"
+        type: string
+        required: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+      with:
+        submodules: recursive
+
+    - name: Run setup-libraries composite action
+      uses: ./lib_ass/src/main/cpp/libass-cmake/.github/actions/setup-libraries
+      with:
+        libass-cmake-path: ${{ github.workspace }}/lib_ass/src/main/cpp/libass-cmake
+
+    - name: Build
+      run: ./gradlew assembleRelease
+
+    - name: Upload lib_ass AAR
+      uses: actions/upload-artifact@v4
+      with:
+        name: lib_ass
+        path: lib_ass/build/outputs/aar/*.aar
+
+    - name: Upload lib_ass_kt AAR
+      uses: actions/upload-artifact@v4
+      with:
+        name: lib_ass_kt
+        path: lib_ass_kt/build/outputs/aar/*.aar
+
+    - name: Upload lib_ass_media AAR
+      uses: actions/upload-artifact@v4
+      with:
+        name: lib_ass_media
+        path: lib_ass_media/build/outputs/aar/*.aar
+
+    - name: Create GitHub release
+      if: ${{ inputs.create_release && inputs.release_tag != '' }}
+      run: |
+        gh release create "${{ inputs.release_tag }}" \
+          --target "${{ github.sha }}" \
+          --title "${{ inputs.release_tag }}" \
+          lib_ass/build/outputs/aar/*.aar \
+          lib_ass_kt/build/outputs/aar/*.aar \
+          lib_ass_media/build/outputs/aar/*.aar
+      env:
+        GH_TOKEN: ${{ github.token }}
