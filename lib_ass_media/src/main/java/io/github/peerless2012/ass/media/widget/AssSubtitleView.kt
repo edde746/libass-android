@@ -1,21 +1,12 @@
 package io.github.peerless2012.ass.media.widget
 import android.content.Context
-import android.os.Build
 import android.util.AttributeSet
-import android.util.Log
 import android.widget.FrameLayout
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import io.github.peerless2012.ass.media.AssHandler
 import io.github.peerless2012.ass.media.type.AssRenderType
 
-/**
- * @Author peerless2012
- * @Email peerless2012@126.com
- * @DateTime 5/26/25 8:58 PM
- * @Version V1.0
- * @Description
- */
 class AssSubtitleView: FrameLayout {
 
     private val assHandler: AssHandler
@@ -40,15 +31,12 @@ class AssSubtitleView: FrameLayout {
                 AssSubtitleCanvasView(context, attrs, defStyleAttr, assHandler)
             }
             AssRenderType.OVERLAY_OPEN_GL -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    AssSubtitleSurfaceView(context, attrs, defStyleAttr, assHandler)
-                } else {
-                    Log.w(
-                        "AssSubtitleView",
-                        "OVERLAY_OPEN_GL requires API 24+; falling back to OVERLAY_CANVAS"
-                    )
-                    AssSubtitleCanvasView(context, attrs, defStyleAttr, assHandler)
-                }
+                // Default to SurfaceView so the subtitle overlay is a real
+                // SurfaceFlinger layer and `eglPresentationTimeANDROID` can pin the
+                // swap to the video's target vsync. Hosts where this SurfaceView's
+                // z-order clashes with their own compositor can instantiate
+                // [AssSubtitleTextureView] directly instead.
+                AssSubtitleSurfaceView(context, attrs, defStyleAttr, assHandler)
             }
             else -> {
                 null
