@@ -1,5 +1,6 @@
 package io.github.peerless2012.ass
 
+import java.nio.ByteBuffer
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
@@ -31,6 +32,16 @@ class AssRender(nativeAss: Long, private val lock: ReentrantLock) {
 
         @JvmStatic
         external fun nativeAssRenderFrame(render: Long, track: Long, time: Long, type: Int): AssFrame?
+
+        @JvmStatic
+        external fun nativeAssRenderFrameAtlas(
+            render: Long,
+            track: Long,
+            time: Long,
+            atlasBuf: ByteBuffer,
+            atlasMaxWidth: Int,
+            vertexBuf: ByteBuffer
+        ): AssAtlasFrame?
 
         @JvmStatic
         external fun nativeAssRenderDeinit(render: Long)
@@ -84,6 +95,30 @@ class AssRender(nativeAss: Long, private val lock: ReentrantLock) {
             val t = track ?: return null
             if (t.released || t.nativeAssTrack == 0L) return null
             return nativeAssRenderFrame(nativeRender, t.nativeAssTrack, time, type.ordinal)
+        }
+    }
+
+    /**
+     * Renders a frame into a packed ALPHA_8 texture atlas plus a single vertex stream
+     * ready for `glDrawArrays(GL_TRIANGLES, 0, quadCount * 6)`.
+     *
+     * @param atlasBuf     direct ByteBuffer receiving the packed pixels
+     * @param atlasMaxW    maximum atlas row width in pixels (bound by `GL_MAX_TEXTURE_SIZE`)
+     * @param vertexBuf    direct ByteBuffer receiving the vertex stream (192 bytes per quad)
+     */
+    public fun renderFrameAtlas(
+        time: Long,
+        atlasBuf: ByteBuffer,
+        atlasMaxW: Int,
+        vertexBuf: ByteBuffer
+    ): AssAtlasFrame? {
+        lock.withLock {
+            if (released || nativeRender == 0L) return null
+            val t = track ?: return null
+            if (t.released || t.nativeAssTrack == 0L) return null
+            return nativeAssRenderFrameAtlas(
+                nativeRender, t.nativeAssTrack, time, atlasBuf, atlasMaxW, vertexBuf
+            )
         }
     }
 

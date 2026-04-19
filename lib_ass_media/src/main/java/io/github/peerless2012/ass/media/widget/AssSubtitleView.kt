@@ -1,6 +1,8 @@
 package io.github.peerless2012.ass.media.widget
 import android.content.Context
+import android.os.Build
 import android.util.AttributeSet
+import android.util.Log
 import android.widget.FrameLayout
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
@@ -10,7 +12,7 @@ import io.github.peerless2012.ass.media.type.AssRenderType
 /**
  * @Author peerless2012
  * @Email peerless2012@126.com
- * @DateTime 5/26/25 8:58 PM
+ * @DateTime 5/26/25 8:58 PM
  * @Version V1.0
  * @Description
  */
@@ -38,7 +40,15 @@ class AssSubtitleView: FrameLayout {
                 AssSubtitleCanvasView(context, attrs, defStyleAttr, assHandler)
             }
             AssRenderType.OVERLAY_OPEN_GL -> {
-                AssSubtitleTextureView(context, attrs, defStyleAttr, assHandler)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    AssSubtitleSurfaceView(context, attrs, defStyleAttr, assHandler)
+                } else {
+                    Log.w(
+                        "AssSubtitleView",
+                        "OVERLAY_OPEN_GL requires API 24+; falling back to OVERLAY_CANVAS"
+                    )
+                    AssSubtitleCanvasView(context, attrs, defStyleAttr, assHandler)
+                }
             }
             else -> {
                 null
@@ -54,14 +64,14 @@ class AssSubtitleView: FrameLayout {
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        assHandler.videoTimeCallback = { presentationTimeUs ->
-            assSubtitleRender?.requestRender(presentationTimeUs)
+        assHandler.videoFrameCallback = { presentationTimeUs, releaseTimeNs ->
+            assSubtitleRender?.requestRender(presentationTimeUs, releaseTimeNs)
         }
     }
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        assHandler.videoTimeCallback = null
+        assHandler.videoFrameCallback = null
     }
 
 }

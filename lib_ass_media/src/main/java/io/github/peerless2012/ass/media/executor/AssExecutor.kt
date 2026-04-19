@@ -25,32 +25,22 @@ class AssExecutor(private val render: AssRender) {
     private val task = AssTask(render)
 
     public fun renderFrame(presentationTimeUs: Long, type: AssTexType): AssFrame? {
-        var assFrame: AssFrame? = null
         if (executorBusy) {
             // render thread is busy, keep last content
-            assFrame = assFrameNotChange
-        } else {
-            // submit render task
-            val future = executorService.submit{
-                executorBusy = true
-                lastFrame = render.renderFrame(presentationTimeUs / 1000, type)
-                executorBusy = false
-                lastFrame
-            }
-            try {
-                assFrame = if (lastFrame != null) {
-                    lastFrame
-                } else {
-                    future.get(8, TimeUnit.MILLISECONDS)
-                }
-            } catch (exception: Exception) {
-                // task timeout
-                assFrame = lastFrame
-                if (assFrame == null) {
-                    // keep last content
-                    assFrame = assFrameNotChange
-                }
-            }
+            return assFrameNotChange
+        }
+        val future = executorService.submit {
+            executorBusy = true
+            lastFrame = render.renderFrame(presentationTimeUs / 1000, type)
+            executorBusy = false
+            lastFrame
+        }
+        // 15 ms is just under one 60 Hz frame period — if libass runs long we fall back
+        // to the previous frame and let the next tick catch up rather than stalling GL.
+        val assFrame: AssFrame? = try {
+            future.get(15, TimeUnit.MILLISECONDS)
+        } catch (_: Exception) {
+            lastFrame ?: assFrameNotChange
         }
         lastFrame = null
         return assFrame

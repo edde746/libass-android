@@ -15,7 +15,6 @@ import androidx.media3.extractor.mkv.MatroskaExtractor
 import androidx.media3.ui.SubtitleView
 import io.github.peerless2012.ass.media.AssHandler
 import io.github.peerless2012.ass.media.extractor.AssMatroskaExtractor
-import io.github.peerless2012.ass.media.factory.AssRenderersFactory
 import io.github.peerless2012.ass.media.parser.AssSubtitleParserFactory
 import io.github.peerless2012.ass.media.type.AssRenderType
 import io.github.peerless2012.ass.media.widget.AssSubtitleView
@@ -42,7 +41,7 @@ fun ExoPlayer.Builder.buildWithAssSupport(
 
     val player = this
         .setMediaSourceFactory(mediaSourceFactory)
-        .setRenderersFactory(renderersFactory.withAssSupport(assHandler))
+        .setRenderersFactory(renderersFactory)
         .build()
 
     if (renderType === AssRenderType.OVERLAY_CANVAS || renderType === AssRenderType.OVERLAY_OPEN_GL) {
@@ -68,11 +67,6 @@ fun ExtractorsFactory.withAssMkvSupport(
         }
         extractors
     }
-}
-
-@OptIn(UnstableApi::class)
-fun RenderersFactory.withAssSupport(assHandler: AssHandler): RenderersFactory {
-    return AssRenderersFactory(assHandler, this)
 }
 
 @OptIn(UnstableApi::class)

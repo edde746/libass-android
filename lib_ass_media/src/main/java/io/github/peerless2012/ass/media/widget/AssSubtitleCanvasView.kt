@@ -45,7 +45,7 @@ class AssSubtitleCanvasView : View, AssSubtitleRender {
             it.bitmap?.prepareToDraw()
         }
         this.assFrame = assFrame
-        handler.post(invalidateCallback)
+        postOnAnimation(invalidateCallback)
     }
 
     constructor(context: Context, assHandler: AssHandler) : this(context, null, assHandler)
@@ -78,8 +78,8 @@ class AssSubtitleCanvasView : View, AssSubtitleRender {
 
     }
 
-    override fun requestRender(timestampNanos: Long) {
-        assExecutor?.asyncRenderFrame(timestampNanos, AssTexType.BITMAP_ALPHA, assRenderCallback)
+    override fun requestRender(presentationTimeUs: Long, releaseTimeNs: Long) {
+        assExecutor?.asyncRenderFrame(presentationTimeUs, AssTexType.BITMAP_ALPHA, assRenderCallback)
     }
 
     override fun onDraw(canvas: Canvas) {
