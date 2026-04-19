@@ -5,11 +5,9 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.OverlayEffect
 import androidx.media3.exoplayer.ExoPlayer
 import io.github.peerless2012.ass.AssRender
-import io.github.peerless2012.ass.media.AssHandler
 
 @OptIn(UnstableApi::class)
 class AssOverlayManager(
-    private val handler: AssHandler,
     private val player: ExoPlayer,
     private val tex: Boolean
 ) {
@@ -24,9 +22,9 @@ class AssOverlayManager(
         if (renderer == currentRenderer) return
         this.currentRenderer = renderer
         val overlay = if (tex) {
-            AssTexOverlay(handler, renderer)
+            AssTexOverlay(renderer)
         } else {
-            AssCanvasOverlay(handler, renderer)
+            AssCanvasOverlay(renderer)
         }
         val effect = OverlayEffect(listOf(overlay))
         player.setVideoEffects(listOf(effect))

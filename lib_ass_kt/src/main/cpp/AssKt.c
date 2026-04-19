@@ -360,6 +360,126 @@ void nativeAssRenderDeinit(JNIEnv* env, jclass clazz, jlong render) {
     }
 }
 
+// Renders a frame into the provided atlas + vertex direct ByteBuffers.
+//
+// - atlasBuf holds packed ALPHA_8 pixels for a single texture (atlasW × atlasH bytes).
+// - vertexBuf holds a per-quad vertex stream (6 vertices × (2 pos + 2 uv + 4 color)
+//   floats = 48 floats = 192 bytes per quad). Must match BYTES_PER_QUAD/VERTEX in
+//   AssSubtitleSurfaceView.kt. Ready for a single glDrawArrays(GL_TRIANGLES, 0, N * 6).
+// - atlasMaxW bounds the packer row width (caller ensures it fits the atlas buffer).
+//
+// Returns an AssAtlasFrame { atlasWidth, atlasHeight, quadCount, changed } or NULL on
+// overflow / missing buffer. On changed == 0, returns (0, 0, 0, 0) without touching the
+// buffers — caller reuses the atlas texture already on the GPU.
+jobject nativeAssRenderFrameAtlas(JNIEnv* env, jclass clazz,
+                                  jlong render, jlong track, jlong time,
+                                  jobject atlasBuf, jint atlasMaxW,
+                                  jobject vertexBuf) {
+    if (!render || !track || !atlasBuf || !vertexBuf || atlasMaxW <= 0) return NULL;
+
+    jclass atlasFrameClass = (*env)->FindClass(env, "io/github/peerless2012/ass/AssAtlasFrame");
+    if (!atlasFrameClass) return NULL;
+    jmethodID ctor = (*env)->GetMethodID(env, atlasFrameClass, "<init>", "(IIII)V");
+    if (!ctor) return NULL;
+
+    int changed;
+    ASS_Image *image = ass_render_frame((ASS_Renderer *)render, (ASS_Track *)track, time, &changed);
+
+    if (changed == 0 || image == NULL) {
+        return (*env)->NewObject(env, atlasFrameClass, ctor, 0, 0, 0, changed);
+    }
+
+    // Pass 1: row-packer walks the image list to compute atlas size and count.
+    int cursorX = 0, cursorY = 0, rowH = 0;
+    int count = 0;
+    for (ASS_Image *img = image; img != NULL; img = img->next) {
+        if (img->w <= 0 || img->h <= 0 || img->w > atlasMaxW) continue;
+        if (cursorX + img->w > atlasMaxW) {
+            cursorY += rowH;
+            cursorX = 0;
+            rowH = 0;
+        }
+        cursorX += img->w;
+        if (img->h > rowH) rowH = img->h;
+        count++;
+    }
+    int atlasH = cursorY + rowH;
+    int atlasW = atlasMaxW;
+    if (count == 0 || atlasH == 0) {
+        return (*env)->NewObject(env, atlasFrameClass, ctor, 0, 0, 0, changed);
+    }
+
+    uint8_t *atlasPixels = (uint8_t *)(*env)->GetDirectBufferAddress(env, atlasBuf);
+    jlong atlasCap = (*env)->GetDirectBufferCapacity(env, atlasBuf);
+    if (!atlasPixels || (jlong)atlasW * atlasH > atlasCap) {
+        __android_log_print(ANDROID_LOG_WARN, LOG_TAG,
+            "atlas overflow: need %dx%d (%lld bytes), capacity %lld bytes",
+            atlasW, atlasH, (long long)atlasW * atlasH, (long long)atlasCap);
+        return NULL;
+    }
+
+    float *vertices = (float *)(*env)->GetDirectBufferAddress(env, vertexBuf);
+    jlong vertexCap = (*env)->GetDirectBufferCapacity(env, vertexBuf);
+    // 48 floats per quad × 4 bytes = 192 bytes/quad
+    if (!vertices || (jlong)count * 192 > vertexCap) {
+        __android_log_print(ANDROID_LOG_WARN, LOG_TAG,
+            "vertex buffer overflow: %d quads need %lld bytes, capacity %lld bytes",
+            count, (long long)count * 192, (long long)vertexCap);
+        return NULL;
+    }
+
+    memset(atlasPixels, 0, (size_t)atlasW * atlasH);
+
+    // Pass 2: copy bitmaps + emit vertex stream.
+    cursorX = 0; cursorY = 0; rowH = 0;
+    int qi = 0;
+    for (ASS_Image *img = image; img != NULL; img = img->next) {
+        if (img->w <= 0 || img->h <= 0 || img->w > atlasMaxW) continue;
+        if (cursorX + img->w > atlasMaxW) {
+            cursorY += rowH;
+            cursorX = 0;
+            rowH = 0;
+        }
+
+        for (int y = 0; y < img->h; y++) {
+            uint8_t *dst = atlasPixels + (size_t)(cursorY + y) * atlasW + cursorX;
+            const uint8_t *src = img->bitmap + (size_t)y * img->stride;
+            memcpy(dst, src, (size_t)img->w);
+        }
+
+        const float x0 = (float)img->dst_x;
+        const float y0 = (float)img->dst_y;
+        const float x1 = x0 + (float)img->w;
+        const float y1 = y0 + (float)img->h;
+        const float u0 = (float)cursorX / (float)atlasW;
+        const float v0 = (float)cursorY / (float)atlasH;
+        const float u1 = (float)(cursorX + img->w) / (float)atlasW;
+        const float v1 = (float)(cursorY + img->h) / (float)atlasH;
+        const unsigned int c = img->color;
+        const float r = (float)((c >> 24) & 0xFFu) / 255.0f;
+        const float g = (float)((c >> 16) & 0xFFu) / 255.0f;
+        const float b = (float)((c >>  8) & 0xFFu) / 255.0f;
+        const float a = (float)(0xFFu - (c & 0xFFu))  / 255.0f;
+
+        float *vx = vertices + (size_t)qi * 48;
+        // 8 floats per vertex: x, y, u, v, r, g, b, a.
+        // Triangle 1: (x0,y0) (x1,y0) (x0,y1)
+        vx[ 0]=x0; vx[ 1]=y0; vx[ 2]=u0; vx[ 3]=v0; vx[ 4]=r; vx[ 5]=g; vx[ 6]=b; vx[ 7]=a;
+        vx[ 8]=x1; vx[ 9]=y0; vx[10]=u1; vx[11]=v0; vx[12]=r; vx[13]=g; vx[14]=b; vx[15]=a;
+        vx[16]=x0; vx[17]=y1; vx[18]=u0; vx[19]=v1; vx[20]=r; vx[21]=g; vx[22]=b; vx[23]=a;
+        // Triangle 2: (x1,y0) (x1,y1) (x0,y1)
+        vx[24]=x1; vx[25]=y0; vx[26]=u1; vx[27]=v0; vx[28]=r; vx[29]=g; vx[30]=b; vx[31]=a;
+        vx[32]=x1; vx[33]=y1; vx[34]=u1; vx[35]=v1; vx[36]=r; vx[37]=g; vx[38]=b; vx[39]=a;
+        vx[40]=x0; vx[41]=y1; vx[42]=u0; vx[43]=v1; vx[44]=r; vx[45]=g; vx[46]=b; vx[47]=a;
+
+        cursorX += img->w;
+        if (img->h > rowH) rowH = img->h;
+        qi++;
+    }
+
+    return (*env)->NewObject(env, atlasFrameClass, ctor, atlasW, atlasH, count, changed);
+}
+
 static JNINativeMethod renderMethodTable[] = {
         {"nativeAssRenderInit", "(J)J", (void*)nativeAssRenderInit},
         {"nativeAssRenderSetFontScale", "(JF)V", (void*)nativeAssRenderSetFontScale},
@@ -367,6 +487,7 @@ static JNINativeMethod renderMethodTable[] = {
         {"nativeAssRenderSetStorageSize", "(JII)V", (void*) nativeAssRenderSetStorageSize},
         {"nativeAssRenderSetFrameSize", "(JII)V", (void*)nativeAssRenderSetFrameSize},
         {"nativeAssRenderFrame", "(JJJI)Lio/github/peerless2012/ass/AssFrame;", (void*) nativeAssRenderFrame},
+        {"nativeAssRenderFrameAtlas", "(JJJLjava/nio/ByteBuffer;ILjava/nio/ByteBuffer;)Lio/github/peerless2012/ass/AssAtlasFrame;", (void*) nativeAssRenderFrameAtlas},
         {"nativeAssRenderDeinit", "(J)V", (void*)nativeAssRenderDeinit},
 };
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {

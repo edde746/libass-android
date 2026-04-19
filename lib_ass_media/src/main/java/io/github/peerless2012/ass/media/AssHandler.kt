@@ -13,6 +13,7 @@ import androidx.media3.common.VideoSize
 import androidx.media3.common.util.Size
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.video.VideoFrameMetadataListener
 import io.github.peerless2012.ass.AssRender
 import io.github.peerless2012.ass.AssTrack
 import io.github.peerless2012.ass.Ass
@@ -65,27 +66,24 @@ class AssHandler(
     var surfaceSize = Size.ZERO
         private set
 
-    /**  The video frame time. (default is 24fps)  */
-    val videoFramePeriod = 3
+    /**
+     * Per-video-frame callback. Fired by ExoPlayer just before MediaCodec releases the frame
+     * to the output surface. Carries the exact PTS of the frame and the System.nanoTime()
+     * domain target release time, so subtitle renderers can align composition to the same
+     * display vsync as the video.
+     *
+     * - [presentationTimeUs] is track-relative microseconds matching the subtitle track's PTS.
+     * - [releaseTimeNs] may be [androidx.media3.common.C.TIME_UNSET] in rare paths.
+     *
+     * Invoked on the playback thread.
+     */
+    var videoFrameCallback: ((presentationTimeUs: Long, releaseTimeNs: Long) -> Unit)? = null
 
-    private var videoFrameIndex = 0
+    private val videoFrameMetadataListener = VideoFrameMetadataListener { pts, releaseNs, _, _ ->
+        videoFrameCallback?.invoke(pts, releaseNs)
+    }
 
-    var videoTime = -1L
-        set(value) {
-            if (field == value) {
-                return
-            }
-            field = value
-            if (videoFrameIndex == 0) {
-                videoTimeCallback?.invoke(value)
-            }
-            videoFrameIndex++
-            if (videoFrameIndex >= videoFramePeriod) {
-                videoFrameIndex %= videoFramePeriod
-            }
-        }
-
-    var videoTimeCallback: ((Long) -> Unit)? = null
+    private var player: ExoPlayer? = null
 
     /** The overlay manager for toggling the effects renderer. */
     private var overlayManager: AssOverlayManager? = null
@@ -101,10 +99,12 @@ class AssHandler(
      * @param player The ExoPlayer instance to attach to.
      */
     fun init(player: ExoPlayer) {
+        this.player = player
         player.addListener(this)
+        player.setVideoFrameMetadataListener(videoFrameMetadataListener)
         handler = Handler(player.applicationLooper)
         if (renderType == AssRenderType.EFFECTS_CANVAS || renderType == AssRenderType.EFFECTS_OPEN_GL) {
-            overlayManager = AssOverlayManager(this, player, renderType == AssRenderType.EFFECTS_OPEN_GL)
+            overlayManager = AssOverlayManager(player, renderType == AssRenderType.EFFECTS_OPEN_GL)
         }
     }
 
@@ -120,8 +120,6 @@ class AssHandler(
         availableTracks.clear()
         pendingFonts.clear()
         videoSize = Size.ZERO
-        videoTime = -1
-        videoFrameIndex = 0
         overlayManager?.disable()
         renderCallback?.invoke(null)
     }
@@ -346,7 +344,9 @@ class AssHandler(
      * Releases all native resources held by this handler.
      */
     fun release() {
-        videoTimeCallback = null
+        videoFrameCallback = null
+        player?.clearVideoFrameMetadataListener(videoFrameMetadataListener)
+        player = null
         overlayManager?.disable()
         render?.release()
         render = null
